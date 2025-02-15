@@ -10,8 +10,41 @@ from twilio.twiml.voice_response import VoiceResponse, Say
 from twilio.request_validator import RequestValidator
 from functools import wraps
 
+def format_phone_number(phone):
+    """
+    Format phone number to ensure it has the correct prefix
+    - Removes any spaces, dashes, or parentheses
+    - Adds +91 prefix for Indian numbers if not present
+    """
+    if not phone:
+        return None
+        
+    # Remove any non-digit characters except '+'
+    cleaned = ''.join(char for char in phone if char.isdigit() or char == '+')
+    
+    # If number starts with '0', remove it
+    if cleaned.startswith('0'):
+        cleaned = cleaned[1:]
+    
+    # If number starts with '91', ensure it has '+'
+    if cleaned.startswith('91'):
+        cleaned = '+' + cleaned
+    
+    # If number doesn't have any prefix, add '+91'
+    if not cleaned.startswith('+'):
+        if cleaned.startswith('91'):
+            cleaned = '+' + cleaned
+        else:
+            cleaned = '+91' + cleaned
+    
+    # Validate the final format
+    if not cleaned.startswith('+91') or len(cleaned) != 13:
+        return None
+            
+    return cleaned
+
 # Global base URL - Change this as needed
-BASE_URL = "https://5feb-2409-40d0-12d2-a7f0-f42a-d366-3bdb-a980.ngrok-free.app"
+BASE_URL = "https://ed0c-2409-40d0-12d2-a7f0-8c2a-7004-e9a1-a173.ngrok-free.app"
 
 app = Flask(__name__)
 
@@ -56,11 +89,13 @@ def validate_twilio_request(f):
         
         # For ngrok URLs, we need to ensure we're using https and the correct host
         if 'ngrok' in url:
-            # Get the base URL from environment
-            base_url = "https://5feb-2409-40d0-12d2-a7f0-f42a-d366-3bdb-a980.ngrok-free.app"
-            if base_url:
-                # Reconstruct the URL using the base_url and the path
-                url = f"{base_url}{request.path}"
+            # Get the forwarded host and proto from headers
+            forwarded_proto = request.headers.get('X-Forwarded-Proto', 'https')
+            forwarded_host = request.headers.get('X-Forwarded-Host', '')
+            
+            if forwarded_host:
+                # Reconstruct the URL using the forwarded information
+                url = f"{forwarded_proto}://{forwarded_host}{request.path}"
                 if request.query_string:
                     url = f"{url}?{request.query_string.decode('utf-8')}"
         
@@ -83,7 +118,7 @@ def validate_twilio_request(f):
         print(f"Client IP: {request.remote_addr}")
         
         # Skip validation in development/testing
-        if os.environ.get('FLASK_ENV') == 'development':
+        if os.environ.get('FLASK_ENV') == 'testing':
             print("Skipping validation - development mode")
             return f(*args, **kwargs)
         
@@ -254,6 +289,20 @@ def call():
     application_type = data.get('type')
     if not application_type or application_type not in ['loan', 'cc']:
         return jsonify({"error": "Invalid or missing application type. Must be 'loan' or 'cc'"}), 400
+    
+    # Format and validate the phone number
+    phone = data.get('phone')
+    if not phone:
+        return jsonify({"error": "Phone number is required"}), 400
+        
+    formatted_phone = format_phone_number(phone)
+    if not formatted_phone:
+        return jsonify({
+            "error": "Invalid phone number format",
+            "message": "Phone number must be a valid Indian number with 10 digits and proper country code (e.g., +91XXXXXXXXXX)"
+        }), 400
+        
+    data['phone'] = formatted_phone
         
     # Convert cc to credit_card for internal processing
     if application_type == 'cc':
@@ -327,7 +376,7 @@ def initiate_automated_call(application_type):
         print(f"\n=== Request Data ===")
         print(f"Received data: {data}")
         
-        customer_number = data.get('phone')
+        customer_number = format_phone_number(data.get('phone'))
         customer_name = data.get('name', 'Customer')
         
         # Check if there's already an active call for this number
@@ -612,6 +661,16 @@ def process_application():
         
     name = data.get('name')
     phone_number = data.get('phone_number')
+    
+    # Format and validate phone number
+    if phone_number:
+        phone_number = format_phone_number(phone_number)
+        if not phone_number:
+            return jsonify({
+                "error": "Invalid phone number format",
+                "message": "Phone number must be a valid Indian number with 10 digits and proper country code (e.g., +91XXXXXXXXXX)"
+            }), 400
+            
     application_type = data.get('application_type')
     application_data = data.get('application_data')
     
@@ -674,7 +733,7 @@ def process_incomplete_application(phone_number, call_data):
                 customer_name = session_data.get('customer_name', 'Unknown')
                 
                 # Process responses if we have enough information
-                if len(session_data['responses']) >= 5:  # At least 5 questions answered
+                if len(session_data['responses']) >= 2:  # At least 5 questions answered
                     print(f"Processing responses for {phone_number}")
                     # Mark that we're processing this application
                     active_calls[session_key]['processing'] = True
