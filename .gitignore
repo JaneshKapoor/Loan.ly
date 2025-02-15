@@ -1,0 +1,6 @@
+responses/
+.env
+notes.md
+app.log
+applications/
+temp.py
