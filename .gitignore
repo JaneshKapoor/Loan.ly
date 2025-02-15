@@ -4,3 +4,5 @@ notes.md
 app.log
 applications/
 temp.py
+venv/
+__pycache__/
