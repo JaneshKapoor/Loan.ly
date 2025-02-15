@@ -2,27 +2,63 @@ import React, { useState } from 'react';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
+// Backend API URL
+const BASE_URL = 'http://localhost:5001';
+
 function App() {
   const [name, setName] = useState('');
   const [phone, setPhone] = useState('');
   const [creditType, setCreditType] = useState('creditCard');
+  const [isSubmitting, setIsSubmitting] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    // Simulating an API call with setTimeout
-    await fetch('http://localhost:5000/api/submit', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        name,
-        phone,
-        creditType,
-      }),
-    });
+    
+    // Basic validation
+    if (!name.trim() || !phone.trim()) {
+      toast.error('Please fill in all fields');
+      return;
+    }
 
-    toast.success('Call Initiated Successfully');
+    // Phone number validation (basic)
+    if (!phone.startsWith('+')) {
+      toast.error('Phone number must start with country code (e.g., +91)');
+      return;
+    }
+
+    setIsSubmitting(true);
+    
+    try {
+      const response = await fetch(`${BASE_URL}/call`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          name: name.trim(),
+          phone: phone.trim(),
+          type: creditType === 'creditCard' ? 'cc' : 'loan'
+        }),
+      });
+
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error || 'Failed to initiate call');
+      }
+
+      toast.success('Call initiated successfully! You will receive a call shortly.');
+      // Clear form
+      setName('');
+      setPhone('');
+      setCreditType('creditCard');
+      
+    } catch (error) {
+      console.error('Error:', error);
+      toast.error(error.message || 'Failed to initiate call. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
   };
 
   return (
@@ -87,8 +123,12 @@ function App() {
             </div>
           </div>
 
-          <button type="submit" className="w-full bg-[#009959] text-white p-3 rounded-md hover:bg-green-600 transition duration-300">
-            Submit
+          <button 
+            type="submit" 
+            className="w-full bg-[#009959] text-white p-3 rounded-md hover:bg-green-600 transition duration-300 disabled:opacity-50 disabled:cursor-not-allowed"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? 'Initiating Call...' : 'Submit'}
           </button>
         </form>
         <ToastContainer />
