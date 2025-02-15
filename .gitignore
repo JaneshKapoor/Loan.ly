@@ -5,5 +5,4 @@ app.log
 applications/
 temp.py
 venv/
-node_modules/
 __pycache__/
