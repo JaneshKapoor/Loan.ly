@@ -533,11 +533,19 @@ def handle_call():
             
             question_index = step - 2  # Adjust for the initial confirmation step
             
-            # Check if we've collected all responses
-            if question_index >= len(questions):
+            # Check if we should play outro (end of questions or call ending)
+            should_play_outro = (
+                question_index >= len(questions) - 1 or  # Last question completed
+                request.values.get('CallStatus') in ['completed', 'failed', 'busy', 'no-answer', 'canceled'] or  # Call ending
+                'Hangup' in request.values.get('Digits', '') or  # User hung up
+                request.values.get('DialCallStatus') in ['completed', 'failed', 'busy', 'no-answer', 'canceled']  # Call status in different format
+            )
+            
+            if should_play_outro:
+                print("Playing outro message...")
                 # First, thank them for their responses
                 twiml_response.say(
-                    "Thank you for providing all the information. We are now evaluating your application.",
+                    "Thank you for providing the information. We are now evaluating your application.",
                     voice='Polly.Aditi'
                 )
                 twiml_response.pause(length=1)
@@ -550,7 +558,9 @@ def handle_call():
                 session_key = f"{phone_number}_{application_type}"
                 if session_key in active_calls:
                     active_calls[session_key]['verdict_delivered'] = True
+                    active_calls[session_key]['outro_played'] = True
                 
+                print("Outro message played, hanging up...")
                 # Now hang up after delivering the message
                 twiml_response.hangup()
                 
@@ -663,41 +673,43 @@ def process_incomplete_application(phone_number, call_data):
                 if not os.path.exists('responses'):
                     os.makedirs('responses')
                 
-                # Convert responses to application data format
-                application_data = {}
-                if application_type == 'credit_card':
-                    questions = financial_system.generate_cc_questions()
-                else:
-                    questions = financial_system.generate_loan_questions()
-                    
-                for q_index, response in session_data['responses'].items():
-                    if int(q_index) < len(questions):
-                        key = questions[int(q_index)].rstrip('?').lower().replace(' ', '_')
-                        application_data[key] = response
-                
                 # Get verdict from OpenAI
                 try:
                     if application_type == 'credit_card':
-                        verdict = financial_system.evaluate_cc_application(application_data)
+                        verdict = financial_system.evaluate_cc_application(session_data['responses'])
                     else:
-                        verdict = financial_system.evaluate_loan_application(application_data)
+                        verdict = financial_system.evaluate_loan_application(session_data['responses'])
                 except Exception as e:
                     print(f"Error getting verdict: {str(e)}")
                     verdict = "INVESTIGATION_REQUIRED"
                 
-                # Prepare response data
+                # Generate comments based on the verdict
+                comments = []
+                if verdict == "YES":
+                    comments.append("Application meets all eligibility criteria")
+                elif verdict == "NO":
+                    comments.append("Application does not meet minimum eligibility requirements")
+                else:
+                    comments.append("Further verification and documentation required")
+                    
+                # Add call-specific comments
+                if call_data.get('CallDuration'):
+                    duration = int(call_data.get('CallDuration', 0))
+                    if duration < 30:
+                        comments.append("Call duration was too short - incomplete information")
+                    elif duration < 60:
+                        comments.append("Partial information collected")
+                
+                # Prepare clean response data
                 response_data = {
                     "customer_name": customer_name,
                     "phone_number": phone_number,
-                    "application_type": application_type,
-                    "responses": session_data['responses'],
-                    "application_data": application_data,
+                    "application_type": "Credit Card" if application_type == 'credit_card' else "Loan",
                     "verdict": verdict,
-                    "call_data": call_data,
+                    "comments": comments,
                     "timestamp": datetime.now().isoformat(),
                     "call_duration": call_data.get('CallDuration'),
-                    "call_status": call_data.get('CallStatus'),
-                    "call_sid": call_data.get('CallSid')
+                    "call_status": call_data.get('CallStatus')
                 }
                 
                 # Save to JSON file with timestamp and phone number
@@ -739,7 +751,24 @@ def call_status():
     if request.values.get('CallStatus') in ['completed', 'failed', 'busy', 'no-answer', 'canceled']:
         phone_number = request.values.get('To')
         if phone_number:
+            # Create a TwiML response for the outro
+            twiml_response = VoiceResponse()
+            twiml_response.say(
+                "Thank you for providing the information. We are now evaluating your application.",
+                voice='Polly.Aditi'
+            )
+            twiml_response.pause(length=1)
+            twiml_response.say(
+                "Our team will reach out to you within 24 hours with the results. Have a great day!",
+                voice='Polly.Aditi'
+            )
+            twiml_response.hangup()
+            
+            # Process the application
             process_incomplete_application(phone_number, dict(request.values))
+            
+            # Return the TwiML response
+            return Response(str(twiml_response), mimetype='text/xml')
     
     return '', 200
 
