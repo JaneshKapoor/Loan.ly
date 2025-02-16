@@ -11,6 +11,34 @@ function App() {
   const [creditType, setCreditType] = useState('creditCard');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  const formatPhoneNumber = (phone) => {
+    if (!phone) return '';
+    
+    // Remove any non-digit characters except '+'
+    let cleaned = phone.replace(/[^\d+]/g, '');
+    
+    // If number starts with '0', remove it
+    if (cleaned.startsWith('0')) {
+      cleaned = cleaned.substring(1);
+    }
+    
+    // If number starts with '91', ensure it has '+'
+    if (cleaned.startsWith('91')) {
+      cleaned = '+' + cleaned;
+    }
+    
+    // If number doesn't have any prefix, add '+91'
+    if (!cleaned.startsWith('+')) {
+      if (cleaned.startsWith('91')) {
+        cleaned = '+' + cleaned;
+      } else {
+        cleaned = '+91' + cleaned;
+      }
+    }
+    
+    return cleaned;
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     
@@ -20,9 +48,10 @@ function App() {
       return;
     }
 
-    // Phone number validation (basic)
-    if (!phone.startsWith('+')) {
-      toast.error('Phone number must start with country code (e.g., +91)');
+    // Format and validate phone number
+    const formattedPhone = formatPhoneNumber(phone);
+    if (!formattedPhone.startsWith('+91') || formattedPhone.length !== 13) {
+      toast.error('Please enter a valid Indian phone number');
       return;
     }
 
@@ -36,7 +65,7 @@ function App() {
         },
         body: JSON.stringify({
           name: name.trim(),
-          phone: phone.trim(),
+          phone: formattedPhone,
           type: creditType === 'creditCard' ? 'cc' : 'loan'
         }),
       });
@@ -48,10 +77,6 @@ function App() {
       }
 
       toast.success('Call initiated successfully! You will receive a call shortly.');
-      // Clear form
-      setName('');
-      setPhone('');
-      setCreditType('creditCard');
       
     } catch (error) {
       console.error('Error:', error);
@@ -59,6 +84,11 @@ function App() {
     } finally {
       setIsSubmitting(false);
     }
+  };
+
+  const handlePhoneChange = (e) => {
+    const formattedPhone = formatPhoneNumber(e.target.value);
+    setPhone(formattedPhone);
   };
 
   return (
@@ -95,7 +125,7 @@ function App() {
               type="tel"
               placeholder="Phone Number"
               value={phone}
-              onChange={(e) => setPhone(e.target.value)}
+              onChange={handlePhoneChange}
               className="w-full p-3 mb-4 border rounded-md border-[#009959] focus:outline-none focus:ring-2 focus:ring-[#009959]"
             />
           </div>
